@@ -23,9 +23,15 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	errors "k8s.io/apimachinery/pkg/api/errors"
+
+	corev1 "k8s.io/api/core/v1"
 
 	appsv1 "github.com/rahulmukherjee68/secrets-syncronization-operator/api/v1"
 )
+
+// sourceNamespace from where we check if secrets changed or not
+var sourceNamespace string
 
 // SecretsCopyCustomResourceReconciler reconciles a SecretsCopyCustomResource object
 type SecretsCopyCustomResourceReconciler struct {
@@ -47,9 +53,25 @@ type SecretsCopyCustomResourceReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.17.3/pkg/reconcile
 func (r *SecretsCopyCustomResourceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = log.FromContext(ctx)
+	currlogctx := log.FromContext(ctx)
 
-	// TODO(user): your logic here
+	currlogctx.Info("Handler came to rencile method to be check if secrets changed or not")
+
+	// get the SecretsCopyCustomResource instance for destinationSecrets names to be replaced in the destination namespace
+	destinationSecretsInstance := &appsv1.SecretsCopyCustomResource{}
+
+	// fetch user passed secrets list
+	err := r.Get(ctx, req.NamespacedName, destinationSecretsInstance)
+
+	if err != nil{
+		if errors.IsNotFound(err) {
+			currlogctx.Info("destinationSecretsInstance not found", "SecretsCopyCustomResource", req.Name, "Namespace", req.Namespace)
+			return ctrl.Result{}, nil
+		}
+		currlogctx.Error(err, "Failed to get destinationSecretsInstance")
+	}
+
+	currlogctx.Info("Successfully fetched SecretsCopyCustomResource from CR")
 
 	return ctrl.Result{}, nil
 }
@@ -58,5 +80,6 @@ func (r *SecretsCopyCustomResourceReconciler) Reconcile(ctx context.Context, req
 func (r *SecretsCopyCustomResourceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&appsv1.SecretsCopyCustomResource{}).
+		Owns(&corev1.Secret{}). //wathcing secrets to be changed
 		Complete(r)
 }
