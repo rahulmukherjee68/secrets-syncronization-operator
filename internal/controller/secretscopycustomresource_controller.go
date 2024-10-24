@@ -255,7 +255,7 @@ func (r *SecretsCopyCustomResourceReconciler) SetupWithManager(mgr ctrl.Manager)
 		 Watches(
 			&corev1.Secret{},
 			handler.EnqueueRequestsFromMapFunc(r.handlerFunction),
-			builder.WithPredicates(predicate.ResourceVersionChangedPredicate{}, sourcePredicate(ctx)),
+			builder.WithPredicates(predicate.ResourceVersionChangedPredicate{}, r.sourcePredicate(ctx)),
 		).
 		Complete(r)
 }
