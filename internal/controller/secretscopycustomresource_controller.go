@@ -104,21 +104,24 @@ func (r *SecretsCopyCustomResourceReconciler) createOrUpdateSecrets(ctx context.
 		Namespace: sourceNamespace,
 		Name:      secretName,
 	}
+	isDeletedFromSource := false
 	// updating sourceSecret instance with k8 client
 	if err := r.Get(ctx, sourceSecretKey, sourceSecretObj); err != nil {
 		if errors.IsNotFound(err) {
 			currlogctx.Info("Source secret not found with Source Namespace ", "SourceNameSpace", sourceNamespace, "SecretName", secretName)
-			return nil
+			isDeletedFromSource = true
+			// return nil
+		} else {
+			currlogctx.Error(err, "Failed to get source secret with Source Namespace ", "SourceNameSpace", sourceNamespace, "SecretName", secretName)
+			return err
 		}
-		currlogctx.Error(err, "Failed to get source secret with Source Namespace ", "SourceNameSpace", sourceNamespace, "SecretName", secretName)
-		return err
 	}
 
 	// Create or update the destination secrets
 	destinationSecretObj := &corev1.Secret{}
 	destinationSecretKey := client.ObjectKey{
 		Namespace: secretsCopyCustomResourceInstance.Namespace,
-		Name:      sourceSecretObj.Name,
+		Name:      secretName,
 	}
 	if err := r.Get(ctx, destinationSecretKey, destinationSecretObj); err != nil {
 		if errors.IsNotFound(err) {
@@ -127,6 +130,13 @@ func (r *SecretsCopyCustomResourceReconciler) createOrUpdateSecrets(ctx context.
 		}
 		currlogctx.Error(err, "Failed to get destination secret", "Namespace", secretsCopyCustomResourceInstance.Namespace, "Secret", secretName)
 		return err
+	}
+	if isDeletedFromSource {
+		if err := r.Delete(ctx, destinationSecretObj); err != nil {
+			currlogctx.Error(err, "Failed to delete unreferenced secret from source", "Namespace", secretsCopyCustomResourceInstance.Namespace, "Name", secretName)
+			return err
+		}
+		return nil
 	}
 
 	// if values of secrets are not equal then update destination secret
