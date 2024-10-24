@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"reflect"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -73,7 +74,61 @@ func (r *SecretsCopyCustomResourceReconciler) Reconcile(ctx context.Context, req
 
 	currlogctx.Info("Successfully fetched SecretsCopyCustomResource from CR")
 
+	// Iterating over the list of secrets specfied in specs
+	for _, secretName := range destinationSecretsInstance.Spec.DestinationSecrets {
+		if err := r.createOrUpdateSecrets(ctx, destinationSecretsInstance, secretName, destinationSecretsInstance.Spec.SourceNamespace); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
 	return ctrl.Result{}, nil
+}
+
+
+// updating source secret to the dentination namespace secret either creating new or updating
+func (r *SecretsCopyCustomResourceReconciler) createOrUpdateSecrets(ctx context.Context, secretsCopyCustomResource *appsv1.SecretsCopyCustomResource, secretName, sourceNamespace string) error {
+	currlogctx := log.FromContext(ctx)
+	currlogctx.Info("Processing for ", sourceNamespace,"with secret name ", secretName)
+
+	// Get the source secret
+	sourceSecretObj := &corev1.Secret{}
+	sourceSecretKey := client.ObjectKey{
+		Namespace: sourceNamespace,
+		Name:      secretName,
+	}
+	// updating sourceSecret instance with k8 client
+	if err := r.Get(ctx, sourceSecretKey, sourceSecretObj); err != nil {
+		if errors.IsNotFound(err) {
+			currlogctx.Info("Source secret not found with Source Namespace ", sourceNamespace, " and secret name ", secretName)
+			return nil
+		}
+		currlogctx.Error(err, "Failed to get source secret with Source Namespace ", sourceNamespace, " and secret name ", secretName)
+		return err
+	}
+
+	// Create or update the destination secrets
+	destinationSecretObj := &corev1.Secret{}
+	destinationSecretKey := client.ObjectKey{
+		Namespace: secretsCopyCustomResource.Namespace,
+		Name:      secretsCopyCustomResource.Name,
+	}
+	if err := r.Get(ctx, destinationSecretKey, destinationSecretObj); err != nil {
+		if errors.IsNotFound(err) {
+			// create the destination secret if not found in destination host
+			return r.createSecret(ctx, secretsCopyCustomResource, sourceSecretObj)
+		}
+		currlogctx.Error(err, "Failed to get destination secret", "Namespace", secretsCopyCustomResource.Namespace, "Secret", secretName)
+		return err
+	}
+
+	// if values of secrets are not equal then update destination secret
+	if !reflect.DeepEqual(sourceSecretObj.Data, destinationSecretObj.Data) {
+		// Update the destination secret with source value is different from destination
+		return r.updateSecret(ctx, secretsCopyCustomResource, destinationSecretObj, sourceSecretObj)
+	}
+	// Destination secret is already up to date
+	currlogctx.Info("Source and Destination secrets are Synced Sucessfully")
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

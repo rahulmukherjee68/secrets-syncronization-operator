@@ -29,6 +29,7 @@ type SecretsCopyCustomResourceSpec struct {
 	// Important: Run "make" to regenerate code after modifying this file
 
 	DestinationSecrets []string `json:"destinationSecrets"`
+	SourceNamespace string `json:"sourceNamespace"`
 }
 
 // SecretsCopyCustomResourceStatus defines the observed state of SecretsCopyCustomResource
