@@ -30,6 +30,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	corev1 "k8s.io/api/core/v1"
 	
@@ -181,7 +183,7 @@ func (r *SecretsCopyCustomResourceReconciler) createSecret(ctx context.Context, 
 }
 
 
-func (r *SecretsCopyCustomResourceReconciler) destinationNamespacePredicate(ctx context.Context) predicate.Predicate {
+func (r *SecretsCopyCustomResourceReconciler) destinationPredicate(ctx context.Context) predicate.Predicate {
 	// filter our rencoiles for secrets which are not changed
 	return predicate.Funcs{
 		UpdateFunc: func(e event.UpdateEvent) bool {
@@ -224,6 +226,21 @@ func (r *SecretsCopyCustomResourceReconciler) destinationNamespacePredicate(ctx 
 
 }
 
+func (r *SecretsCopyCustomResourceReconciler) sourcePredicate(ctx context.Context) predicate.Predicate {
+	// filter our rencoiles for secrets which are not changed
+	return predicate.Funcs{
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			return true
+		},
+	}
+}
+
+
+
+func (r *SecretsCopyCustomResourceReconciler) handlerFunction(ctx context.Context, o client.Object) []reconcile.Request {
+	var requests []reconcile.Request
+	return requests
+}
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *SecretsCopyCustomResourceReconciler) SetupWithManager(mgr ctrl.Manager) error {
@@ -232,6 +249,13 @@ func (r *SecretsCopyCustomResourceReconciler) SetupWithManager(mgr ctrl.Manager)
 		// watchs SecretsCopyCustomResource
 		For(&appsv1.SecretsCopyCustomResource{}).
 		// watcher for DestinationSecrets
-		Owns(&corev1.Secret{}, builder.WithPredicates(r.destinationNamespacePredicate(ctx))). //wathcing secrets to be changed
+		Owns(&corev1.Secret{}, builder.WithPredicates(r.destinationPredicate(ctx))).
+
+		 //wathcing secrets in source for every events
+		 Watches(
+			&corev1.Secret{},
+			handler.EnqueueRequestsFromMapFunc(r.handlerFunction),
+			builder.WithPredicates(predicate.ResourceVersionChangedPredicate{}, sourcePredicate(ctx)),
+		).
 		Complete(r)
 }
