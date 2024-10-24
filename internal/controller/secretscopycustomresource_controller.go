@@ -41,7 +41,7 @@ import (
 )
 
 // sourceNamespace from where we check if secrets changed or not
-var sourceNamespace string
+var inputNamespace string
 
 // SecretsCopyCustomResourceReconciler reconciles a SecretsCopyCustomResource object
 type SecretsCopyCustomResourceReconciler struct {
@@ -85,14 +85,13 @@ func (r *SecretsCopyCustomResourceReconciler) Reconcile(ctx context.Context, req
 
 	// Iterating over the list of secrets specfied in specs
 	for _, secretName := range destinationSecretsInstance.Spec.DestinationSecrets {
-		if err := r.createOrUpdateSecrets(ctx, destinationSecretsInstance, secretName, destinationSecretsInstance.Spec.SourceNamespace); err != nil {
+		if err := r.createOrUpdateSecrets(ctx, destinationSecretsInstance, secretName, inputNamespace); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
 
 	return ctrl.Result{}, nil
 }
-
 
 // updating source secret to the dentination namespace secret either creating new or updating
 func (r *SecretsCopyCustomResourceReconciler) createOrUpdateSecrets(ctx context.Context, secretsCopyCustomResourceInstance *appsv1.SecretsCopyCustomResource, secretName, sourceNamespace string) error {
@@ -206,11 +205,11 @@ func (r *SecretsCopyCustomResourceReconciler) destinationPredicate(ctx context.C
 
 			//old secret
 			err = r.Get(ctx, client.ObjectKey{
-				Namespace: sourceNamespace,
+				Namespace: inputNamespace,
 				Name:      e.ObjectNew.GetName(),
 			}, sourceSecret)
 			if err != nil {
-				currlogctx.Error(err, "Failed to get source secret", "Namespace", sourceNamespace, "Name", e.ObjectNew.GetName())
+				currlogctx.Error(err, "Failed to get source secret", "Namespace", inputNamespace, "Name", e.ObjectNew.GetName())
 				return false
 			}
 
@@ -233,7 +232,7 @@ func (r *SecretsCopyCustomResourceReconciler) sourcePredicate(ctx context.Contex
 		// return true if new secret is created in source namespace
 		CreateFunc: func(e event.CreateEvent) bool {
 
-			isSourceNameSpace := e.Object.GetNamespace() == sourceNamespace
+			isSourceNameSpace := e.Object.GetNamespace() == inputNamespace
 			if isSourceNameSpace {
 				log.FromContext(ctx).Info("Create Event came from source secret")
 			}
@@ -241,7 +240,7 @@ func (r *SecretsCopyCustomResourceReconciler) sourcePredicate(ctx context.Contex
 		},
 		// return true if new secret is updated in source namespace
 		UpdateFunc: func(e event.UpdateEvent) bool {
-			isSourceNameSpace := e.ObjectNew.GetNamespace() == sourceNamespace
+			isSourceNameSpace := e.ObjectNew.GetNamespace() == inputNamespace
 			if isSourceNameSpace {
 				log.FromContext(ctx).Info("Update Event came from source secret")
 			}
@@ -250,7 +249,7 @@ func (r *SecretsCopyCustomResourceReconciler) sourcePredicate(ctx context.Contex
 		},
 		// return true if new secret is deleted in source namespace
 		DeleteFunc: func(e event.DeleteEvent) bool {
-			isSourceNameSpace := e.Object.GetNamespace() == sourceNamespace
+			isSourceNameSpace := e.Object.GetNamespace() == inputNamespace
 			if isSourceNameSpace {
 				log.FromContext(ctx).Info("Delete Event came from source secret")
 			}
@@ -299,9 +298,9 @@ func (r *SecretsCopyCustomResourceReconciler) handlerFunction(ctx context.Contex
 // SetupWithManager sets up the controller with the Manager.
 func (r *SecretsCopyCustomResourceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
-	sourceNamespace = os.Getenv("SOURCE_NAMESPACE")
-	if sourceNamespace == "" {
-		sourceNamespace = "default"
+	inputNamespace = os.Getenv("INPUT_NAMESPACE")
+	if inputNamespace == "" {
+		inputNamespace = "default"
 	}
 
 	var destinationSecretsField = ".spec.destinationSecrets"
