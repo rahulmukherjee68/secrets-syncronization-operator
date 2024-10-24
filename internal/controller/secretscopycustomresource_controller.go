@@ -27,8 +27,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 
 	corev1 "k8s.io/api/core/v1"
+	
 
 	appsv1 "github.com/rahulmukherjee68/secrets-syncronization-operator/api/v1"
 )
@@ -176,10 +180,58 @@ func (r *SecretsCopyCustomResourceReconciler) createSecret(ctx context.Context, 
 	return nil
 }
 
+
+func (r *SecretsCopyCustomResourceReconciler) destinationNamespacePredicate(ctx context.Context) predicate.Predicate {
+	// filter our rencoiles for secrets which are not changed
+	return predicate.Funcs{
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			currlogctx := log.FromContext(ctx)
+
+			// Fetch objects
+			newSecret := &corev1.Secret{}
+			sourceSecret := &corev1.Secret{}
+
+			// new secret
+			err := r.Get(ctx, client.ObjectKey{
+				Namespace: e.ObjectNew.GetNamespace(),
+				Name: e.ObjectNew.GetName(),
+			}, newSecret)
+			if err != nil {
+				currlogctx.Error(err, "Failed to get new secret", "Namespace", e.ObjectNew.GetNamespace(), "Name", e.ObjectNew.GetName())
+				return false
+			}
+
+			//old secret
+			err = r.Get(ctx, client.ObjectKey{
+				Namespace: sourceNamespace,
+				Name: e.ObjectNew.GetName(),
+			}, sourceSecret)
+			if err != nil {
+				currlogctx.Error(err, "Failed to get source secret", "Namespace", sourceNamespace, "Name", e.ObjectNew.GetName())
+				return false
+			}
+
+			// ignoring reoncile if source secret == destination secret
+			if reflect.DeepEqual(sourceSecret.Data, newSecret.Data) {
+				currlogctx.Info("secrets Equal................................")
+				return false
+			} else {
+				currlogctx.Info("Secrets updated in source.....................")
+				return true
+			}
+		},
+	}
+
+}
+
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *SecretsCopyCustomResourceReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	ctx := context.Background()
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&appsv1.SecretsCopyCustomResource{}).
+		// watchs SecretsCopyCustomResource
+		For(&appsv1.SecretsCopyCustomResource{},  builder.WithPredicates(r.destinationNamespacePredicate(ctx))).
+		// watcher for DestinationSecrets
 		Owns(&corev1.Secret{}). //wathcing secrets to be changed
 		Complete(r)
 }
