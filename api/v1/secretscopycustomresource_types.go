@@ -28,14 +28,15 @@ type SecretsCopyCustomResourceSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	// Foo is an example field of SecretsCopyCustomResource. Edit secretscopycustomresource_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	DestinationSecrets []string `json:"destinationSecrets"`
 }
 
 // SecretsCopyCustomResourceStatus defines the observed state of SecretsCopyCustomResource
 type SecretsCopyCustomResourceStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
+
+	IsConfigSynced bool `json:"synced,omitempty"`
 }
 
 //+kubebuilder:object:root=true
