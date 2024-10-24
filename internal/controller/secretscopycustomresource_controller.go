@@ -22,9 +22,11 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	errors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -86,7 +88,7 @@ func (r *SecretsCopyCustomResourceReconciler) Reconcile(ctx context.Context, req
 
 
 // updating source secret to the dentination namespace secret either creating new or updating
-func (r *SecretsCopyCustomResourceReconciler) createOrUpdateSecrets(ctx context.Context, secretsCopyCustomResource *appsv1.SecretsCopyCustomResource, secretName, sourceNamespace string) error {
+func (r *SecretsCopyCustomResourceReconciler) createOrUpdateSecrets(ctx context.Context, secretsCopyCustomResourceInstance *appsv1.SecretsCopyCustomResource, secretName, sourceNamespace string) error {
 	currlogctx := log.FromContext(ctx)
 	currlogctx.Info("Processing for ", sourceNamespace,"with secret name ", secretName)
 
@@ -109,25 +111,70 @@ func (r *SecretsCopyCustomResourceReconciler) createOrUpdateSecrets(ctx context.
 	// Create or update the destination secrets
 	destinationSecretObj := &corev1.Secret{}
 	destinationSecretKey := client.ObjectKey{
-		Namespace: secretsCopyCustomResource.Namespace,
-		Name:      secretsCopyCustomResource.Name,
+		Namespace: secretsCopyCustomResourceInstance.Namespace,
+		Name:      secretsCopyCustomResourceInstance.Name,
 	}
 	if err := r.Get(ctx, destinationSecretKey, destinationSecretObj); err != nil {
 		if errors.IsNotFound(err) {
 			// create the destination secret if not found in destination host
-			return r.createSecret(ctx, secretsCopyCustomResource, sourceSecretObj)
+			return r.createSecret(ctx, secretsCopyCustomResourceInstance, sourceSecretObj)
 		}
-		currlogctx.Error(err, "Failed to get destination secret", "Namespace", secretsCopyCustomResource.Namespace, "Secret", secretName)
+		currlogctx.Error(err, "Failed to get destination secret", "Namespace", secretsCopyCustomResourceInstance.Namespace, "Secret", secretName)
 		return err
 	}
 
 	// if values of secrets are not equal then update destination secret
 	if !reflect.DeepEqual(sourceSecretObj.Data, destinationSecretObj.Data) {
 		// Update the destination secret with source value is different from destination
-		return r.updateSecret(ctx, secretsCopyCustomResource, destinationSecretObj, sourceSecretObj)
+		return r.updateSecret(ctx, secretsCopyCustomResourceInstance, destinationSecretObj, sourceSecretObj)
 	}
 	// Destination secret is already up to date
 	currlogctx.Info("Source and Destination secrets are Synced Sucessfully")
+	return nil
+}
+
+// method to update secret from source Namespace to destination Namespace
+func (r *SecretsCopyCustomResourceReconciler) updateSecret(ctx context.Context, secretsCopyCustomResourceInstance *appsv1.SecretsCopyCustomResource, destinationSecret, sourceSecret *corev1.Secret) error {
+	currlogctx := log.FromContext(ctx)
+	dstNamespace := secretsCopyCustomResourceInstance.Namespace 
+	currlogctx.Info("updating secret in destination namespace ", dstNamespace, " with secret name ", sourceSecret.Name)
+
+	destinationSecret.Data = sourceSecret.Data
+	// Set owner reference to SecretsCopyCustomResource object
+	if err := controllerutil.SetControllerReference(secretsCopyCustomResourceInstance, destinationSecret, r.Scheme); err != nil {
+		currlogctx.Error(err, "Failed to set owner reference for destination secret file")
+		return err
+	}
+	if err := r.Update(ctx, destinationSecret); err != nil {
+		currlogctx.Error(err, "Failed to update Secret with destination namespace",dstNamespace, "with source secret name ",sourceSecret.Name)
+		return err
+	}
+	return nil
+}
+
+
+//method to create a copy of a secret from source Namespace to destination Namespace
+func (r *SecretsCopyCustomResourceReconciler) createSecret(ctx context.Context, secretsCopyCustomResourceInstance *appsv1.SecretsCopyCustomResource, sourceSecret *corev1.Secret) error {
+	currlogctx := log.FromContext(ctx)
+	dstNamespace := secretsCopyCustomResourceInstance.Namespace 
+	currlogctx.Info("creating secret in destination namespace ",dstNamespace, "with secret name ", sourceSecret.Name)
+
+	destinationSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      sourceSecret.Name,
+			Namespace: dstNamespace,
+		},
+		Data: sourceSecret.Data, // Copy data Resource from source to destination secret file
+	}
+	// Set owner reference to SecretsCopyCustomResource object
+	if err := controllerutil.SetControllerReference(secretsCopyCustomResourceInstance, destinationSecret, r.Scheme); err != nil {
+		currlogctx.Error(err, "Failed to set owner reference for destination secret file")
+		return err
+	}
+	if err := r.Create(ctx, destinationSecret); err != nil {
+		currlogctx.Error(err, "Failed to create Secret with destination namespace",dstNamespace, "with source secret name ",sourceSecret.Name)
+		return err
+	}
 	return nil
 }
 
