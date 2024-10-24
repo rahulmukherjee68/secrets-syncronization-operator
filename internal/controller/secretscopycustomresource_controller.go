@@ -229,12 +229,34 @@ func (r *SecretsCopyCustomResourceReconciler) destinationPredicate(ctx context.C
 func (r *SecretsCopyCustomResourceReconciler) sourcePredicate(ctx context.Context) predicate.Predicate {
 	// filter our rencoiles for secrets which are not changed
 	return predicate.Funcs{
+		// return true if new secret is created in source namespace
+		CreateFunc: func(e event.CreateEvent) bool {
+			
+			isSourceNameSpace :=  e.Object.GetNamespace() == sourceNamespace
+			if isSourceNameSpace{
+				log.FromContext(ctx).Info("Create Event came from source secret")
+			}
+			return isSourceNameSpace
+		},
+		// return true if new secret is updated in source namespace
 		UpdateFunc: func(e event.UpdateEvent) bool {
-			return true
+			isSourceNameSpace :=  e.ObjectNew.GetNamespace() == sourceNamespace
+			if isSourceNameSpace {
+				log.FromContext(ctx).Info("Update Event came from source secret")
+			}
+			return isSourceNameSpace
+			
+		},
+		// return true if new secret is deleted in source namespace
+		DeleteFunc: func(e event.DeleteEvent) bool {
+			isSourceNameSpace :=  e.Object.GetNamespace() == sourceNamespace
+			if isSourceNameSpace{
+				log.FromContext(ctx).Info("Delete Event came from source secret")
+			}
+			return isSourceNameSpace
 		},
 	}
 }
-
 
 
 func (r *SecretsCopyCustomResourceReconciler) handlerFunction(ctx context.Context, o client.Object) []reconcile.Request {
