@@ -299,11 +299,8 @@ func (r *SecretsCopyCustomResourceReconciler) handlerFunction(ctx context.Contex
 // SetupWithManager sets up the controller with the Manager.
 func (r *SecretsCopyCustomResourceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
-	// Read the source namespace from environment variable
 	sourceNamespace = os.Getenv("SOURCE_NAMESPACE")
 	if sourceNamespace == "" {
-		// Handle case where environment variable is not set
-		// panic("SOURCE_NAMESPACE environment variable not set")
 		sourceNamespace = "default"
 	}
 
