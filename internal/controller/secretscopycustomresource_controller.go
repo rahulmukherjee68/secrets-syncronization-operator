@@ -230,8 +230,8 @@ func (r *SecretsCopyCustomResourceReconciler) SetupWithManager(mgr ctrl.Manager)
 	ctx := context.Background()
 	return ctrl.NewControllerManagedBy(mgr).
 		// watchs SecretsCopyCustomResource
-		For(&appsv1.SecretsCopyCustomResource{},  builder.WithPredicates(r.destinationNamespacePredicate(ctx))).
+		For(&appsv1.SecretsCopyCustomResource{}).
 		// watcher for DestinationSecrets
-		Owns(&corev1.Secret{}). //wathcing secrets to be changed
+		Owns(&corev1.Secret{}, builder.WithPredicates(r.destinationNamespacePredicate(ctx))). //wathcing secrets to be changed
 		Complete(r)
 }
