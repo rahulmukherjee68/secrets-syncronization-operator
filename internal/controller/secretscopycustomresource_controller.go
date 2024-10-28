@@ -123,14 +123,21 @@ func (r *SecretsCopyCustomResourceReconciler) createOrUpdateSecrets(ctx context.
 		Namespace: secretsCopyCustomResourceInstance.Namespace,
 		Name:      secretName,
 	}
+
+	
 	if err := r.Get(ctx, destinationSecretKey, destinationSecretObj); err != nil {
 		if errors.IsNotFound(err) {
 			// create the destination secret if not found in destination host
-			return r.createSecret(ctx, secretsCopyCustomResourceInstance, sourceSecretObj)
+			if !isDeletedFromSource{
+				return r.createSecret(ctx, secretsCopyCustomResourceInstance, sourceSecretObj)
+			}else{
+				return nil
+			}
 		}
 		currlogctx.Error(err, "Failed to get destination secret", "Namespace", secretsCopyCustomResourceInstance.Namespace, "Secret", secretName)
 		return err
 	}
+
 	if isDeletedFromSource {
 		if err := r.Delete(ctx, destinationSecretObj); err != nil {
 			currlogctx.Error(err, "Failed to delete unreferenced secret from source", "Namespace", secretsCopyCustomResourceInstance.Namespace, "Name", secretName)
@@ -138,6 +145,7 @@ func (r *SecretsCopyCustomResourceReconciler) createOrUpdateSecrets(ctx context.
 		}
 		return nil
 	}
+	
 
 	// if values of secrets are not equal then update destination secret
 	if !reflect.DeepEqual(sourceSecretObj.Data, destinationSecretObj.Data) {
