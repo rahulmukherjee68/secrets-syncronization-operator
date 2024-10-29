@@ -85,7 +85,7 @@ func (r *SecretsCopyCustomResourceReconciler) Reconcile(ctx context.Context, req
 
 	// Iterating over the list of secrets specfied in specs
 	for _, secretName := range destinationSecretsInstance.Spec.DestinationSecrets {
-		if err := r.createOrUpdateSecrets(ctx, destinationSecretsInstance, secretName, inputNamespace); err != nil {
+		if err := r.createOrUpdateOrDeleteSecrets(ctx, destinationSecretsInstance, secretName, inputNamespace); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
@@ -94,7 +94,7 @@ func (r *SecretsCopyCustomResourceReconciler) Reconcile(ctx context.Context, req
 }
 
 // updating source secret to the dentination namespace secret either creating new or updating
-func (r *SecretsCopyCustomResourceReconciler) createOrUpdateSecrets(ctx context.Context, secretsCopyCustomResourceInstance *appsv1.SecretsCopyCustomResource, secretName, sourceNamespace string) error {
+func (r *SecretsCopyCustomResourceReconciler) createOrUpdateOrDeleteSecrets(ctx context.Context, secretsCopyCustomResourceInstance *appsv1.SecretsCopyCustomResource, secretName, sourceNamespace string) error {
 	currlogctx := log.FromContext(ctx)
 	currlogctx.Info("Into the method createOrUpdateSecrets", "SourceNameSpace", sourceNamespace, "SecretName", secretName)
 
@@ -127,7 +127,7 @@ func (r *SecretsCopyCustomResourceReconciler) createOrUpdateSecrets(ctx context.
 	
 	if err := r.Get(ctx, destinationSecretKey, destinationSecretObj); err != nil {
 		if errors.IsNotFound(err) {
-			// create the destination secret if not found in destination host
+			// create the destination secret if not found in destination host and not deleted
 			if !isDeletedFromSource{
 				return r.createSecret(ctx, secretsCopyCustomResourceInstance, sourceSecretObj)
 			}else{
@@ -287,7 +287,7 @@ func (r *SecretsCopyCustomResourceReconciler) handlerFunction(ctx context.Contex
 		return nil
 	}
 
-	// Prepare a list of CopySync objects referencing the updated secret
+	// Prepare a list of SecretsCopyCustomResource objects referencing the updated secret
 	secretsCopyCustomResourceList := &appsv1.SecretsCopyCustomResourceList{}
 	listOpts := &client.ListOptions{
 		FieldSelector: fields.OneTermEqualSelector(destinationSecretsField, secret.GetName()),
