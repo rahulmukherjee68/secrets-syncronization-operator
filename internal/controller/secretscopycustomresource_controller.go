@@ -49,6 +49,9 @@ var inputLabelKey string
 // source label value 
 var inputLabelValue string
 
+var newSecretFromDiffNameSpace string
+var newSecretNameSecretKey string
+
 
 // SecretsCopyCustomResourceReconciler reconciles a SecretsCopyCustomResource object
 type SecretsCopyCustomResourceReconciler struct {
@@ -70,11 +73,20 @@ type SecretsCopyCustomResourceReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.17.3/pkg/reconcile
 func (r *SecretsCopyCustomResourceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+
+	
+
+
 	currlogctx := log.FromContext(ctx)
 
 	currlogctx.Info("Handler came to rencile method to be check if secrets changed or not")
 
 	// get the SecretsCopyCustomResource instance for destinationSecrets names to be replaced in the destination namespace
+	if err := r.createNewSecretIfAvailable(ctx, newSecretFromDiffNameSpace,newSecretNameSecretKey,inputNamespace); err != nil {
+			return ctrl.Result{}, err
+	}
+
+
 	destinationSecretsInstance := &appsv1.SecretsCopyCustomResource{}
 
 	// fetch user passed secrets list
@@ -98,6 +110,58 @@ func (r *SecretsCopyCustomResourceReconciler) Reconcile(ctx context.Context, req
 	}
 
 	return ctrl.Result{}, nil
+}
+
+
+// creating new secret if avaiable in source with new created namespace
+func (r *SecretsCopyCustomResourceReconciler) createNewSecretIfAvailable(ctx context.Context, newNameSpace string,newSecretKey string, sourceNamespace string) error{
+	currlogctx := log.FromContext(ctx)
+	currlogctx.Info("Into the method createNewSecretIfAvailable", "NewNameSpace", newNameSpace, "NewSecretName", newSecretKey)
+	// Get the source secret
+
+	sourceSecretObj := &corev1.Secret{}
+	sourceSecretKey := client.ObjectKey{
+		Namespace: sourceNamespace,
+		Name:      newSecretKey,
+	}
+	isPresentInSource := true
+	// updating sourceSecret instance with k8 client
+	if err := r.Get(ctx, sourceSecretKey, sourceSecretObj); err != nil {
+		if errors.IsNotFound(err) {
+			currlogctx.Info("Source secret not found with Source Namespace ", "SourceNameSpace", sourceNamespace, "SecretName", newSecretKey)
+			isPresentInSource = false
+			// return nil
+		}
+	}
+	if !isPresentInSource{
+		currlogctx.Info("Secrets not found in source ", "SourceNameSpace", sourceNamespace, "SecretName", newSecretKey)
+		return nil
+	}
+
+	destinationSecretObj := &corev1.Secret{}
+	destinationSecretKey := client.ObjectKey{
+		Namespace: newNameSpace,
+		Name:      newSecretKey,
+	}
+
+	if err := r.Get(ctx, destinationSecretKey, destinationSecretObj); err != nil {
+		if errors.IsNotFound(err) {
+			// create the destination secret if not found in destination host and not deleted
+			if !isPresentInSource{
+				return r.createSecretWithDiffNameSpace(ctx, newNameSpace, sourceSecretObj)
+			}else{
+				return nil
+			}
+		}
+		currlogctx.Error(err, "Failed to get destination secret", "Namespace", newNameSpace, "Secret", newSecretKey)
+		return err
+	}
+
+
+
+
+
+	return nil
 }
 
 // updating source secret to the dentination namespace secret either creating new or updating
@@ -183,6 +247,32 @@ func (r *SecretsCopyCustomResourceReconciler) updateSecret(ctx context.Context, 
 	return nil
 }
 
+
+// method to create a copy of a secret from source Namespace to destination Namespace
+func (r *SecretsCopyCustomResourceReconciler) createSecretWithDiffNameSpace(ctx context.Context, newNameSpace string, sourceSecret *corev1.Secret) error {
+	currlogctx := log.FromContext(ctx)
+	dstNamespace := newNameSpace
+	currlogctx.Info("creating secret in destination namespace ", "DestinationNameSpace", dstNamespace, "SourceSecretName", sourceSecret.Name)
+
+	destinationSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      sourceSecret.Name,
+			Namespace: newNameSpace,
+		},
+		Data: sourceSecret.Data, // Copy data Resource from source to destination secret file
+	}
+	// Set owner reference to SecretsCopyCustomResource object
+	// if err := controllerutil.SetControllerReference(secretsCopyCustomResourceInstance, destinationSecret, r.Scheme); err != nil {
+	// 	currlogctx.Error(err, "Failed to set owner reference for destination secret file")
+	// 	return err
+	// }
+	if err := r.Create(ctx, destinationSecret); err != nil {
+		currlogctx.Error(err, "Failed to create Secret with destination namespace", "DestinationNameSpace", newNameSpace, "SourceSecretName", sourceSecret.Name)
+		return err
+	}
+	return nil
+}
+
 // method to create a copy of a secret from source Namespace to destination Namespace
 func (r *SecretsCopyCustomResourceReconciler) createSecret(ctx context.Context, secretsCopyCustomResourceInstance *appsv1.SecretsCopyCustomResource, sourceSecret *corev1.Secret) error {
 	currlogctx := log.FromContext(ctx)
@@ -240,10 +330,10 @@ func (r *SecretsCopyCustomResourceReconciler) destinationPredicate(ctx context.C
 
 			// ignoring reoncile if source secret == destination secret
 			if reflect.DeepEqual(sourceSecret.Data, newSecret.Data) {
-				currlogctx.Info("secrets Equal................................")
+				currlogctx.Info("secrets Equal not need to change...................")
 				return false
 			} else {
-				currlogctx.Info("Secrets updated in source.....................")
+				currlogctx.Info("Secrets changed need to update destination.....................")
 				return true
 			}
 		},
@@ -327,6 +417,85 @@ func (r *SecretsCopyCustomResourceReconciler) handlerFunction(ctx context.Contex
 	return requests
 }
 
+
+
+func (r *SecretsCopyCustomResourceReconciler) namespaceHandlerFunction(ctx context.Context, o client.Object) []reconcile.Request {
+
+	// var destinationSecretsField = ".spec.destinationSecrets"
+	inputLabelKey:= "secretname"
+	var namespaceValue string
+	var exists bool
+	currlogctx := log.FromContext(ctx)
+	var requests []reconcile.Request
+
+	// check if its a secret type event or not
+	namespace, err := o.(*corev1.Namespace)
+	if !err {
+		return nil
+	}
+	
+	// Label doesn't match, skip this event request
+	if namespaceValue, exists = namespace.Labels[inputLabelKey]; !exists {
+		return nil
+	}
+	newSecretFromDiffNameSpace = namespaceValue
+	newSecretNameSecretKey = namespace.GetName()
+
+	currlogctx.Info("Added new secret with different namespace", "NameSpace", namespace.GetNamespace(), "SecretKey", newSecretFromDiffNameSpace)
+	
+
+	// // Prepare a list of SecretsCopyCustomResource objects referencing the updated secret
+	// secretsCopyCustomResourceList := &appsv1.SecretsCopyCustomResourceList{}
+	// listOpts := &client.ListOptions{
+	// 	FieldSelector: fields.OneTermEqualSelector(destinationSecretsField, secret.GetName()),
+	// }
+	// if err := r.List(context.Background(), secretsCopyCustomResourceList, listOpts); err != nil {
+	// 	currlogctx.Error(err, "Failed to get secretsCopyCustomResourceList from secret", "Secret", secret.GetName())
+	// 	return nil
+	// }
+
+	// Extract reconcile requests from the found SecretsCopyCustomResource objects
+	// for _, ss := range secretsCopyCustomResourceList.Items {
+	// 	requests = append(requests, reconcile.Request{
+	// 		NamespacedName: client.ObjectKey{
+	// 			Name:      ss.GetName(),
+	// 			Namespace: ss.GetNamespace(),
+	// 		},
+	// 	})
+	// }
+	// if len(requests) > 0 {
+	// 	currlogctx.Info("Got SecretsCopyCustomResource object for the secret ", "Secret", secret.GetName(), "CurrentRequest", requests)
+	// }
+
+
+	requests = append(requests, reconcile.Request{
+		NamespacedName: client.ObjectKey{
+			Name:      namespace.GetName(),
+			Namespace: namespace.GetNamespace(),
+		},
+	})
+	return requests
+}
+
+
+
+
+func (r *SecretsCopyCustomResourceReconciler) nameSpacePredicate(ctx context.Context) predicate.Predicate {
+	// filter our rencoiles for secrets which are not changed
+	return predicate.Funcs{
+		// return true if new secret is created in source namespace
+		CreateFunc: func(e event.CreateEvent) bool {
+
+			// isSourceNameSpace := e.Object.GetNamespace() == inputNamespace
+			// if isSourceNameSpace {
+			// 	log.FromContext(ctx).Info("Create Event came from source namespace")
+			// }
+			return true
+		},
+	}
+}
+
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *SecretsCopyCustomResourceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
@@ -358,14 +527,19 @@ func (r *SecretsCopyCustomResourceReconciler) SetupWithManager(mgr ctrl.Manager)
 	return ctrl.NewControllerManagedBy(mgr).
 		// watchs SecretsCopyCustomResource
 		For(&appsv1.SecretsCopyCustomResource{}).
-		// watcher for DestinationSecrets
-		Owns(&corev1.Secret{}, builder.WithPredicates(r.destinationPredicate(ctx))).
+		// watcher for DestinationSecrets return true when update is requried
+		// Owns(&corev1.Secret{}, builder.WithPredicates(r.destinationPredicate(ctx))).
 
-		//wathcing secrets in source for every events
+		// //wathcing secrets in source for every events
+		// Watches(
+		// 	&corev1.Secret{},
+		// 	handler.EnqueueRequestsFromMapFunc(r.handlerFunction),
+		// 	builder.WithPredicates(predicate.ResourceVersionChangedPredicate{}, r.sourcePredicate(ctx)),
+		// ).
 		Watches(
-			&corev1.Secret{},
-			handler.EnqueueRequestsFromMapFunc(r.handlerFunction),
-			builder.WithPredicates(predicate.ResourceVersionChangedPredicate{}, r.sourcePredicate(ctx)),
+			&corev1.Namespace{},
+			handler.EnqueueRequestsFromMapFunc(r.namespaceHandlerFunction),
+			builder.WithPredicates(r.nameSpacePredicate(ctx)),
 		).
 		Complete(r)
 }
