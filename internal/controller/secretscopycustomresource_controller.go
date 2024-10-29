@@ -43,6 +43,13 @@ import (
 // sourceNamespace from where we check if secrets changed or not
 var inputNamespace string
 
+// source label key
+var inputLabelKey string
+
+// source label value 
+var inputLabelValue string
+
+
 // SecretsCopyCustomResourceReconciler reconciles a SecretsCopyCustomResource object
 type SecretsCopyCustomResourceReconciler struct {
 	client.Client
@@ -277,6 +284,7 @@ func (r *SecretsCopyCustomResourceReconciler) sourcePredicate(ctx context.Contex
 }
 
 func (r *SecretsCopyCustomResourceReconciler) handlerFunction(ctx context.Context, o client.Object) []reconcile.Request {
+
 	var destinationSecretsField = ".spec.destinationSecrets"
 	currlogctx := log.FromContext(ctx)
 	var requests []reconcile.Request
@@ -286,6 +294,12 @@ func (r *SecretsCopyCustomResourceReconciler) handlerFunction(ctx context.Contex
 	if !err {
 		return nil
 	}
+	
+	// Label doesn't match, skip this event request
+	if secretValue, exists := secret.Labels[inputLabelKey]; !exists || secretValue != inputLabelValue {
+		return nil
+	}
+	
 
 	// Prepare a list of SecretsCopyCustomResource objects referencing the updated secret
 	secretsCopyCustomResourceList := &appsv1.SecretsCopyCustomResourceList{}
@@ -320,6 +334,17 @@ func (r *SecretsCopyCustomResourceReconciler) SetupWithManager(mgr ctrl.Manager)
 	if inputNamespace == "" {
 		inputNamespace = "default"
 	}
+
+	inputLabelKey = os.Getenv("INPUT_LABEL_KEY")
+	if inputLabelKey == "" {
+		inputLabelKey = "default"
+	}
+
+	inputLabelValue = os.Getenv("INPUT_LABEL_VALUE")
+	if inputLabelValue == "" {
+		inputLabelValue = "default"
+	}
+
 
 	var destinationSecretsField = ".spec.destinationSecrets"
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &appsv1.SecretsCopyCustomResource{}, destinationSecretsField, func(rawObj client.Object) []string {
